@@ -1,0 +1,258 @@
+---
+title: "ACOMPANHAMENTO DE CARTEIRA - XPTO INVESTIMENTOS"
+format: 
+  dashboard:
+    nav-buttons: [github]
+    github: https://github.com/Ketzer-code/metodos_quantitativos
+logo: images/logo.png
+fig-width: 10
+fig-asp: 0.3
+---
+
+```{r}
+#| label: load-packages
+#| message: false
+
+library(here)
+library(timetk)
+library(scales)
+library(quantmod)
+library(tidyquant)
+library(tidyverse)
+library(lubridate)
+library(tibbletime)
+
+
+theme_set(theme_minimal())
+```
+
+```{r}
+#| label: load-data
+#| message: false
+ativos <- c("ITUB4.SA", "WEGE3.SA", "PRIO3.SA", "EMBR3.SA", "ABCB4.SA", "AGRO3.SA", "SMTO3.SA", "^BVSP")
+
+prices <- getSymbols(
+  ativos,
+  src = "yahoo",
+  from = (today() - 1) %m-% years(5),
+  to = today() - 1,
+  auto.assign = TRUE,
+  warnings = FALSE
+) %>%
+map(~Ad(get(.))) %>%
+reduce(merge) %>%
+"colnames<-"(ativos)
+
+prices_monthly <- prices %>% 
+                      to.monthly(indexAt = "lastof", OHLC = FALSE) %>%
+                      tk_tbl(preserve_index = TRUE, rename_index = "date") %>%
+                      tbl_time(index = "date") %>%
+                      pivot_longer(cols = -date, names_to = "asset", values_to = "returns") %>%
+                      group_by(asset) %>%  
+                      mutate(returns = (log(returns) - log(lag(returns)))) %>%
+                      mutate(linear_returns = exp(returns) - 1) %>%
+                      na.omit() %>% 
+                      mutate(
+                        weight = case_when(
+                            asset %in% c("ABCB4.SA", "ITUB4.SA") ~ .2,
+                            asset %in% c("WEGE3.SA", "PRIO3.SA") ~ .15,
+                            asset %in% c("AGRO3.SA", "SMTO3.SA", "EMBR3.SA") ~ .1,
+                            TRUE ~ 1 # o peso do IBOV eh 1
+                      ),
+                      asset_type = ifelse(asset == "^BVSP", "BENCHMARK", "PORTFOLIO")
+                    ) %>%
+                    mutate(
+                      weigthed_returns = returns * weight,
+                      weigthed_linear_returns = linear_returns * weight
+                    ) %>%
+                    mutate(sharpe = mean(weigthed_returns - .0003) / sd(weigthed_returns - .0003)) %>%
+                    ungroup()
+                
+```
+
+
+#  {.sidebar}
+Esse é o seu dashboard personalizado fornecido pela assessoria da XPTO investimentos. Abaixo, uma breve explicação dos indicadores selecionados:
+
+- SHARPE: Reflete o retorno adicional ajustado a risco (ou retorno por unidade adicional de risco), considerando a taxa livre de risco. Na visão apresentada, foi aplicada uma rolagem de 6 meses, a fim de captar instabilidades sazonais
+
+- RETORNO MÉDIO POR DESVIO PADRÃO: Indica o retorno esperado pela volatilidade de um ativo - quanto mais para cima no eixo vertical um ativo estiver, maior o seu retorno, e quanto mais para a direita estiver no eixo horizontal, maior sua volatilidade
+
+- RETORNO RELATIVO POR ATIVO: Indica a contribuição do ativo para a rentabilidade do portfólio como um todo
+
+- RETORNO MENSAL DA CARTEIRA E DO BENCHMARK: Indica o retorno mês a mês do índice IBOVEPSA e da carteira escolhida.
+
+**INSIGHTS**:
+- Caso o objetivo da carteira seja manutenção do patrimônio (e não necessariamente renda passiva), recomenda-se aumentar a posição em ABCB4 em detrimento de ITUB4, por ser um ativo igualmente estável e com maior retorno
+
+- Considerando que o SHARPE e o retorno da carteira mês a mês estão próximos do índice, pode ser interessante aumentar a posição em PRIO3 (estratégia arrojada) ou em WEGE3 e AGRO3 (estratégia moderada)
+
+- Os ativos SMTO3 e EMBR3 estão contribuindo marginalmente com os retornos e são bastante voláteis - retirar essa posição em favor de alguma das estratégias acima (~20% da carteira) pode ser benéfico no longo prazo
+
+- SUGESTÃO ARROJADA: Realocar 20% de SMTO3 e EMBR3 em 15% PRIO3 e 5% WEG3. 
+CARTEIRA RESULTANTE:
+20% ABCB4, 20% ITUB4, 30% PRIO3, 20% WEG3, 10% AGRO3
+
+RETORNO: 130%
+VOLATILIDADE: 3%
+
+
+- SUGESTÃO MODERADA: Realocar 20% de SMTO3 e EMBR3 em 10% WEG3 e 10% AGRO3
+CARTEIRA RESULTANTE:
+20% ABCB4, 20% ITUB4, 15% PRIO, 25% WEG3, 20% AGRO3
+
+RETORNO: 109%
+VOLATILIDADE: 2,28%
+
+# All
+
+```{r}
+retorno_mercado <- prices_monthly %>%
+                    filter(asset_type == "BENCHMARK") %>%
+                    summarise(ret = sum(weigthed_returns)) %>%
+                    pull()
+
+retorno_mercado <- paste0(round(retorno_mercado * 100, 2), "%")
+
+retorno_carteira <- prices_monthly %>%
+                    filter(asset_type == "PORTFOLIO") %>%
+                    summarise(ret = sum(weigthed_returns)) %>%
+                    pull()
+
+retorno_carteira <- paste0(round(retorno_carteira * 100, 1), "%")
+
+hoje <- today()
+```
+
+## Row {height="20%"}
+
+```{r}
+#| content: valuebox
+#| title: "DATA DE HOJE"
+
+list(
+  color = "secondary",
+  value = hoje
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "RETORNO IBOVESPA"
+
+list(
+  icon = "currency-dollar",
+  color = "primary",
+  value = retorno_mercado
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "RETORNO DA CARTEIRA"
+
+list(
+  icon = "graph-up",
+  value = retorno_carteira
+)
+```
+
+## Row {height="40%"}
+
+### Column {width="40%"}
+
+```{r}
+#| title: SHARPE MENSAL (ROLAGEM JANELA 6M)
+calc_sharpe <- function(data) {
+  return(mean(data$weigthed_returns - .0003, na.rm = T) / sd(data$weigthed_returns - .0003, na.rm = T))
+}
+
+prices_monthly %>%
+  select(date, asset_type, weigthed_returns) %>%
+  group_by(date, asset_type) %>%
+  summarise(weigthed_returns = sum(weigthed_returns)) %>%
+  na.omit() %>%
+  ungroup() %>%
+  tq_mutate(
+    mutate_fun = rollapply,
+    width = 6,
+    FUN = calc_sharpe,
+    col_rename = "rolling_sharpe"   
+    ) %>%
+    na.omit() %>%
+    ggplot(aes(date, rolling_sharpe, colour = asset_type)) +
+    geom_line() +
+    scale_x_date(
+      breaks = date_breaks("3 months"),
+      labels = date_format("%Y/%m")
+    ) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    labs(x = "MÊS", y = "SHARPE", colour = "")
+
+```
+
+### Column {width="40%"}
+
+```{r}
+#| title: RETORNO MÉDIO X DESVIO PADRÃO (POR ATIVO)
+prices_monthly %>%
+  filter(asset!= "^BVSP") %>%
+  group_by(asset) %>%
+  summarise(
+    ret_esp = mean(returns),
+    desv_pad = sd(returns)
+  ) %>%
+  ggplot(aes(desv_pad, ret_esp, colour = asset)) +
+  geom_point(size = 2) +
+  scale_y_continuous(label = scales::percent, breaks = pretty_breaks(n = 10)) +
+  scale_x_continuous(label = scales::percent, breaks = pretty_breaks(n = 10)) +
+  labs(x = "DESVIO PADRÃO", y = "RETORNO ESPERADO", colour = "")
+
+
+```
+
+## Row {height="40%"}
+
+### Column {width="40%"}
+
+```{r}
+#| title: RETORNO RELATIVO POR ATIVO
+
+prices_monthly %>%
+  filter(asset_type != "BENCHMARK")  %>%
+  group_by(asset) %>%
+  summarise(
+    ret_tot = sum(weigthed_returns)
+  ) %>%
+  mutate(
+    ret_rel = ret_tot /  prices_monthly %>% filter(asset_type == "PORTFOLIO") %>%  summarise(ret = sum(weigthed_returns)) %>% pull()
+  ) %>%
+  ggplot(aes(forcats::fct_reorder(asset, ret_rel), ret_rel)) +
+  geom_col() +
+  geom_text(aes(label = paste0(round(ret_rel * 100, 2), "%")), angle = 270, vjust = -1, size = 3) +
+  scale_y_continuous(label = scales::percent, breaks = pretty_breaks(n = 10)) +
+  labs(x = "", y = "RETORNO RELATIVO") +
+  coord_flip()
+
+```
+
+### Column {width="40%"}
+
+```{r}
+#| title: RETORNO MENSAL CARTEIRA X BENCHMARK (HISTORICO)
+prices_monthly %>%
+  group_by(date, asset_type) %>%
+  summarise(
+    tot_ret = sum(weigthed_returns)
+  ) %>%
+  ggplot(aes(date, tot_ret, colour = asset_type)) +
+  geom_line() +
+  scale_x_date(
+      breaks = date_breaks("3 months"),
+      labels = date_format("%Y/%m")
+  ) +
+  scale_y_continuous(label = scales::percent, breaks = pretty_breaks(n = 25)) +
+  labs(x = "MÊS", y = "RETORNO", colour = "") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
